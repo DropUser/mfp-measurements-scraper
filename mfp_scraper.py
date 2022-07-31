@@ -2,14 +2,18 @@ import requests
 import pandas
 from lxml import html
 from functools import reduce
-
+import sys
 
 def get_metrics(metrics_session):
     # Get Metric Types
     url = "https://www.myfitnesspal.com/measurements/edit?page=1&type=1"
     data_result = metrics_session.get(url, headers=dict(referer=url))
+    with open("C:\\Users\\Rober\\Downloads\\test_metrics.html", "wb") as f:
+        f.write(data_result.content)
     tree = html.fromstring(data_result.content)
+    print(f"tree: {tree}")
     metrics = tree.xpath("//select[@name='type']/option")
+    print(metrics)
     all_metrics = []
     for single_metric in metrics:
         all_metrics.append(
@@ -29,7 +33,7 @@ def get_data(data_metric):
         print(f"Getting data for {data_metric['name']} page {current_page}")
         # Request data from page
         url = f"https://www.myfitnesspal.com/measurements/edit?page={current_page}&type={data_metric['id']}"
-        page_result = session_requests.get(url, headers=dict(referer=url))
+        page_result = session.get(url, headers=dict(referer=url))
         tree = html.fromstring(page_result.content)
         # Extract values from the table containing the metrics
         data_table = tree.xpath("//table[@class='table0 check-in']/tbody/tr/td[@class='col-num']/text()")
@@ -61,36 +65,44 @@ if __name__ == "__main__":
     password = input("Enter MyFitnessPal Password: ")
     output_file = input("Enter output file name: ")
 
-    # Create payload for login
-    payload = {
-        "username": username,
-        "password": password
-    }
 
     # Create Session
-    with requests.session() as session_requests:
-        # Get login URL
-        login_url = "https://www.myfitnesspal.com/account/login"
-        login_result = session_requests.get(login_url)
+    with requests.session() as session:
 
-        # Perform Login
-        session_result = session_requests.post(
-            login_url,
-            data=payload,
-            headers=dict(referer=login_url)
+        # Set Headers
+        session.headers.update(
+            {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/88.0.4324.104 Safari/537.36"
+            }
         )
 
-        # Login and validate success
-        login_html = html.fromstring(session_result.content)
-        login_check = login_html.xpath("//form[@class='form login LoginForm']/div[@class='member-login']/p["
-                                       "@class='flash']/text()")
+        # Get login URL
+        login_url = "https://www.myfitnesspal.com/account/login"
+        login_result = session.get(login_url)
 
-        # If login_check found a value, something failed during login
-        if login_check:
-            print(f"Error: Something went wrong during login: '{login_check}'")
-            exit(1)
+        # Get CSRF Token
+        csrf_token_response = session.get("https://www.myfitnesspal.com/api/auth/csrf")
+        csrf_token = session.get("https://www.myfitnesspal.com/api/auth/csrf").json()["csrfToken"]
 
-        metrics_list = get_metrics(session_requests)
+        # Create payload for login
+        payload = {
+            "csrfToken": csrf_token,
+            "username": username,
+            "password": password,
+            "redirect": False,
+            "json": True
+        }
+
+        # Perform Login
+        login_result = session.post(
+            "https://www.myfitnesspal.com/api/auth/callback/credentials",
+            data=payload
+        )
+        if "error=CredentialsSignin" in login_result.url:
+            print("LOGIN FAILED")
+            sys.exit(1)
+
+        metrics_list = get_metrics(session)
         result_set = []
         # Iterate metric type, append to the result set
         for metric in metrics_list:
